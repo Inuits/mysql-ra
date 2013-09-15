@@ -1,0 +1,299 @@
+#!/bin/sh 
+#
+#  Version 0.98.18
+#
+#	MySQL OCF RA. Does nothing but restart MySQL and monitor its connection
+#
+# Based on the Dummy RA Script by LMB.
+# All bugs produced by kris@inuits.eu
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of version 2 of the GNU General Public License as
+# published by the Free Software Foundation.
+#
+# This program is distributed in the hope that it would be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+#
+# Further, this software is distributed without any warranty that it is
+# free of the rightful claim of any third person regarding infringement
+# or the like.  Any license provided herein, whether implied or
+# otherwise, applies only to this software file.  Patent licenses, if
+# any, provided herein do not apply to combinations of this program with
+# other software, or any other product whatsoever.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write the Free Software Foundation,
+# Inc., 59 Temple Place - Suite 330, Boston MA 02111-1307, USA.
+#
+
+#######################################################################
+# Initialization:
+
+. ${OCF_ROOT}/resource.d/heartbeat/.ocf-shellfuncs
+
+#######################################################################
+
+meta_data() {
+	cat <<END
+<?xml version="1.0"?>
+<!DOCTYPE resource-agent SYSTEM "ra-api-1.dtd">
+<resource-agent name="mysql" version="0.9">
+<version>1.0</version>
+
+<longdesc lang="en">
+This is a MySQL Resource Agent. It only restarts MySQL
+</longdesc>
+<shortdesc lang="en">MySQL resource agent</shortdesc>
+
+<parameters>
+
+<parameter name="state" unique="1">
+<longdesc lang="en">
+Location to store the resource state in.
+</longdesc>
+<shortdesc lang="en">State file</shortdesc>
+<content type="string" default="${HA_RSCTMP}/mysql-{OCF_RESOURCE_INSTANCE}.state" />
+</parameter>
+
+<parameter name="test_user" unique="1">
+<content type="string" default="" />
+</parameter>
+
+<parameter name="test_passwd" unique="1">
+<content type="string" default="" />
+</parameter>
+<!-- 
+<parameter name="test_table" unique="1">
+<content type="string" default="" />
+</parameter>
+
+
+<parameter name="test_replication" unique="1">
+<content type="string" default="0" />
+</parameter>
+-->
+
+
+
+</parameters>
+
+<actions>
+<action name="start"        timeout="90" />
+<action name="stop"         timeout="100" />
+<action name="monitor"      timeout="20" interval="10" depth="0" start-delay="0" />
+<action name="reload"       timeout="90" />
+<action name="migrate_to"   timeout="100" />
+<action name="migrate_from" timeout="90" />
+<action name="meta-data"    timeout="5" />
+<action name="validate-all"   timeout="30" />
+</actions>
+</resource-agent>
+END
+}
+
+#######################################################################
+
+# don't exit on TERM, to test that lrmd makes sure that we do exit
+trap sigterm_handler TERM
+sigterm_handler() {
+	ocf_log info "They use TERM to bring us down. No such luck."
+	return
+}
+
+mysql_usage() {
+	cat <<END
+usage: $0 {start|stop|monitor|migrate_to|migrate_from|validate-all|meta-data}
+
+Expects to have a fully populated OCF RA-compliant environment set.
+END
+}
+
+mysql_start() {
+
+  mysql_monitor
+  if [ $? = $OCF_SUCCESS ]; then
+    # MySQL (RA) is already started
+    :
+  else
+    # start MySQL (RA), start MySQL (daemon)
+    touch /var/run/ra-mysql.pid
+    /etc/init.d/mysql start
+  fi
+  return $OCF_SUCCESS
+
+}
+
+mysql_stop() {
+
+  mysql_monitor
+  if [ $? = $OCF_SUCCESS ]; then
+    # stop MySQL (RA)
+    rm -f /var/run/ra-mysql.pid
+    # restart MySQL (daemon) [needed to reset active connections]
+    /etc/init.d/mysql restart
+  else
+    # MySQL (RA) is already stopped
+    :
+  fi
+  return $OCF_SUCCESS
+
+}
+
+mysql_monitor() {
+    # Monitor _MUST!_ differentiate correctly between running
+    # (SUCCESS), failed (ERROR) or _cleanly_ stopped (NOT RUNNING).
+    # That is THREE states, not just yes/no.
+    # Verify the status based on the pid-file existence
+    if [ -e /var/run/ra-mysql.pid ]; then
+        # Verify the status based on the functionality
+	
+        #buf=`echo "SELECT * FROM $OCF_RESKEY_test_table" | mysql --user=$OCF_RESKEY_test_user --password=$OCF_RESKEY_test_passwd  -O connect_timeout=1 2>&1`
+        buf=`echo "SELECT now()" | mysql --user=$OCF_RESKEY_test_user --password=$OCF_RESKEY_test_passwd  -O connect_timeout=1 2>&1`
+        rc=$?
+        if [ $rc -eq 0 ]; then
+
+		# Test Replication code is in experimental stage 
+	    if [ -n "${OCF_RESKEY_test_replication:+x}" ]; then 
+	    	if [ $OCF_RESKEY_test_replication -eq  1 ]; then 
+	    	{
+
+		# Warning:offline node: xms-1
+		notenoughnodes=`crm_mon -s  | grep Warning  | wc -l`
+		if [ $notenoughnodes  -eq 0 ]; then 
+		 	{
+		 	# not enough active nodes to do in depth monitoring 
+			# echo "And we got Enough  Nodes "
+			
+			tmpfile=`mktemp /tmp/replistate.XXXXX`
+			
+			source /etc/mysql.conf || die "Could not load config file /etc/mysql.conf"
+
+ 			# Get Local mysql slave status 
+
+			echo "SHOW SLAVE STATUS \G "| mysql --user=$OCF_RESKEY_test_user --password=$OCF_RESKEY_test_passwd  -O connect_timeout=1  > $tmpfile 
+			local_slave_io=`sed -ne 's/^.*Slave_IO_Running: \(.*\)$/\1/p' < $tmpfile  `
+
+			local_slave_sql=`sed -ne 's/^.*Slave_SQL_Running: \(.*\)$/\1/p' < $tmpfile `
+
+			local_seconds_behind_master=`sed -ne 's/^.*Seconds_Behind_Master: \(.*\)$/\1/p' <  $tmpfile `
+
+			# echo $local_slave_io;
+			# echo $local_slave_sql;
+			# echo $local_seconds_behind_master 
+
+			rm $tmpfile 
+
+ 			# Get remote  mysql slave status 
+
+			tmpfile=`mktemp /tmp/rreplistate.XXXX`
+			echo "SHOW SLAVE STATUS \G "| mysql --user=$OCF_RESKEY_test_user --host $MYSQL_NEIGHBOUR_IP --password=$OCF_RESKEY_test_passwd  -O connect_timeout=1  > $tmpfile 
+	
+  			remote_slave_io=`sed -ne 's/^.*Slave_IO_Running: \(.*\)$/\1/p' < $tmpfile  `
+
+                        remote_slave_sql=`sed -ne 's/^.*Slave_SQL_Running: \(.*\)$/\1/p' < $tmpfile `
+
+                        remote_seconds_behind_master=`sed -ne 's/^.*Seconds_Behind_Master: \(.*\)$/\1/p' <  $tmpfile `
+			
+                        # echo $remote_slave_io;
+                        # echo $remote_slave_sql;
+                        # echo $remote_seconds_behind_master
+
+			remotenode=`crm node list  | grep -vi $(uname -n)  | sed -e "s/(.*//"  `
+			
+			if [ $remote_slave_io == "Yes" ]  && [ $remote_slave_sql ==  "Yes" ]; then 
+				# echo "Remote slave is running"
+				if [ $remote_seconds_behind_master -gt 0 ]; then 
+			    		# echo "Remote node is slow" 
+					if [ $remote_seconds_behind_master -gt $local_seconds_behind_master ]; then 
+						# echo "Remote node is slower than local node -> Demote "
+						cibadmin --replace --obj_type constraints --xml-text "<rsc_location id=\"mysql_repli_lag_$remotenode\" node=\"$remotenode\" rsc=\"svc_mysql\" score=\"100\"/>"
+					fi
+				else
+					# echo "Remote node is running and up to speed , restoring score " 
+					cibadmin --replace --obj_type constraints --xml-text "<rsc_location id=\"mysql_repli_lag_$remotenode\" node=\"$remotenode\" rsc=\"svc_mysql\" score=\"200\"/>"
+				fi
+
+			else 
+				# echo "Remote slave is NOT running -> Degrade heavy "
+				cibadmin --replace --obj_type constraints --xml-text "<rsc_location id=\"mysql_repli_lag_$remotenode\" node=\"$remotenode\" rsc=\"svc_mysql\" score=\"50\"/>"
+			fi	
+	
+			rm $tmpfile 
+
+		  		
+
+
+			} 
+
+			# 	
+			#else
+			#{
+			#echo "Not enough nodes" 
+			#}
+			fi 
+
+	
+ 	    	}	
+	    	else 
+            	{
+            	return $OCF_SUCCESS
+	        } 
+	        fi 
+	    fi
+        else
+            # MySQL check for test_table failed
+            ocf_log err "MySQL $test_table monitor failed";
+            return $OCF_ERR_GENERIC
+        fi
+    else
+        # MySQL (RA) is not running
+        ocf_log err "MySQL (RA) is not running"
+        return $OCF_NOT_RUNNING
+    fi
+
+}
+
+mysql_validate() {
+    
+    # Is the state directory writable? 
+    state_dir=`dirname "$OCF_RESKEY_state"`
+    touch "$state_dir/$$"
+    if [ $? != 0 ]; then
+	return $OCF_ERR_ARGS
+    fi
+    rm "$state_dir/$$"
+
+    return $OCF_SUCCESS
+}
+
+: ${OCF_RESKEY_state=${HA_RSCTMP}/mysql-${OCF_RESOURCE_INSTANCE}.state}
+
+case $__OCF_ACTION in
+meta-data)	meta_data
+		exit $OCF_SUCCESS
+		;;
+start)		mysql_start;;
+stop)		mysql_stop;;
+monitor)	mysql_monitor;;
+migrate_to)	ocf_log info "Migrating ${OCF_RESOURCE_INSTANCE} to ${OCF_RESKEY_CRM_meta_migrate_to}."
+	        mysql_stop
+		;;
+migrate_from)	ocf_log info "Migrating ${OCF_RESOURCE_INSTANCE} to ${OCF_RESKEY_CRM_meta_migrated_from}."
+	        mysql_start
+		;;
+reload)		ocf_log err "Reloading..."
+	        mysql_start
+		;;
+validate-all)	mysql_validate;;
+usage|help)	mysql_usage
+		exit $OCF_SUCCESS
+		;;
+*)		mysql_usage
+		exit $OCF_ERR_UNIMPLEMENTED
+		;;
+esac
+rc=$?
+ocf_log debug "${OCF_RESOURCE_INSTANCE} $__OCF_ACTION : $rc"
+exit $rc
+
