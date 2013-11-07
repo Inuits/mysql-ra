@@ -148,8 +148,8 @@ mysql_monitor() {
     if [ -e /var/run/ra-mysql.pid ]; then
         # Verify the status based on the functionality
 	
-        #buf=`echo "SELECT * FROM $OCF_RESKEY_test_table" | mysql --user=$OCF_RESKEY_test_user --password=$OCF_RESKEY_test_passwd  -O connect_timeout=1 2>&1`
-        buf=`echo "SELECT now()" | mysql --user=$OCF_RESKEY_test_user --password=$OCF_RESKEY_test_passwd  -O connect_timeout=1 2>&1`
+        #buf=`echo "SELECT * FROM $OCF_RESKEY_test_table" | mysql --user=$OCF_RESKEY_test_user --password=$OCF_RESKEY_test_passwd  --connect_timeout=1 2>&1`
+        buf=`echo "SELECT now()" | mysql --user=$OCF_RESKEY_test_user --password=$OCF_RESKEY_test_passwd  --connect_timeout=1 2>&1`
         rc=$?
         if [ $rc -eq 0 ]; then
 
@@ -171,7 +171,7 @@ mysql_monitor() {
 
  			# Get Local mysql slave status 
 
-			echo "SHOW SLAVE STATUS \G "| mysql --user=$OCF_RESKEY_test_user --password=$OCF_RESKEY_test_passwd  -O connect_timeout=1  > $tmpfile 
+			echo "SHOW SLAVE STATUS \G "| mysql --user=$OCF_RESKEY_test_user --password=$OCF_RESKEY_test_passwd  --connect_timeout=1  > $tmpfile 
 			local_slave_io=`sed -ne 's/^.*Slave_IO_Running: \(.*\)$/\1/p' < $tmpfile  `
 
 			local_slave_sql=`sed -ne 's/^.*Slave_SQL_Running: \(.*\)$/\1/p' < $tmpfile `
@@ -187,7 +187,7 @@ mysql_monitor() {
  			# Get remote  mysql slave status 
 
 			tmpfile=`mktemp /tmp/rreplistate.XXXX`
-			echo "SHOW SLAVE STATUS \G "| mysql --user=$OCF_RESKEY_test_user --host $MYSQL_NEIGHBOUR_IP --password=$OCF_RESKEY_test_passwd  -O connect_timeout=1  > $tmpfile 
+			echo "SHOW SLAVE STATUS \G "| mysql --user=$OCF_RESKEY_test_user --host $MYSQL_NEIGHBOUR_IP --password=$OCF_RESKEY_test_passwd  --connect_timeout=1  > $tmpfile 
 	
   			remote_slave_io=`sed -ne 's/^.*Slave_IO_Running: \(.*\)$/\1/p' < $tmpfile  `
 
