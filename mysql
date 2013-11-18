@@ -141,117 +141,87 @@ mysql_stop() {
 }
 
 mysql_monitor() {
-    # Monitor _MUST!_ differentiate correctly between running
-    # (SUCCESS), failed (ERROR) or _cleanly_ stopped (NOT RUNNING).
-    # That is THREE states, not just yes/no.
-    # Verify the status based on the pid-file existence
-    if [ -e /var/run/ra-mysql.pid ]; then
-        # Verify the status based on the functionality
-	
-        #buf=`echo "SELECT * FROM $OCF_RESKEY_test_table" | mysql --user=$OCF_RESKEY_test_user --password=$OCF_RESKEY_test_passwd  --connect_timeout=1 2>&1`
-        buf=`echo "SELECT now()" | mysql --user=$OCF_RESKEY_test_user --password=$OCF_RESKEY_test_passwd  --connect_timeout=1 2>&1`
-        rc=$?
-        if [ $rc -eq 0 ]; then
-
-		# Test Replication code is in experimental stage 
-	    if [ -n "${OCF_RESKEY_test_replication:+x}" ]; then 
-	    	if [ $OCF_RESKEY_test_replication -eq  1 ]; then 
-	    	{
-
-		# Warning:offline node: xms-1
-		notenoughnodes=`crm_mon -s  | grep Warning  | wc -l`
-		if [ $notenoughnodes  -eq 0 ]; then 
-		 	{
-		 	# not enough active nodes to do in depth monitoring 
-			# echo "And we got Enough  Nodes "
-			
-			tmpfile=`mktemp /tmp/replistate.XXXXX`
-			
-			source /etc/mysql.conf || die "Could not load config file /etc/mysql.conf"
-
- 			# Get Local mysql slave status 
-
-			echo "SHOW SLAVE STATUS \G "| mysql --user=$OCF_RESKEY_test_user --password=$OCF_RESKEY_test_passwd  --connect_timeout=1  > $tmpfile 
-			local_slave_io=`sed -ne 's/^.*Slave_IO_Running: \(.*\)$/\1/p' < $tmpfile  `
-
-			local_slave_sql=`sed -ne 's/^.*Slave_SQL_Running: \(.*\)$/\1/p' < $tmpfile `
-
-			local_seconds_behind_master=`sed -ne 's/^.*Seconds_Behind_Master: \(.*\)$/\1/p' <  $tmpfile `
-
-			# echo $local_slave_io;
-			# echo $local_slave_sql;
-			# echo $local_seconds_behind_master 
-
-			rm $tmpfile 
-
- 			# Get remote  mysql slave status 
-
-			tmpfile=`mktemp /tmp/rreplistate.XXXX`
-			echo "SHOW SLAVE STATUS \G "| mysql --user=$OCF_RESKEY_test_user --host $MYSQL_NEIGHBOUR_IP --password=$OCF_RESKEY_test_passwd  --connect_timeout=1  > $tmpfile 
-	
-  			remote_slave_io=`sed -ne 's/^.*Slave_IO_Running: \(.*\)$/\1/p' < $tmpfile  `
-
-                        remote_slave_sql=`sed -ne 's/^.*Slave_SQL_Running: \(.*\)$/\1/p' < $tmpfile `
-
-                        remote_seconds_behind_master=`sed -ne 's/^.*Seconds_Behind_Master: \(.*\)$/\1/p' <  $tmpfile `
-			
-                        # echo $remote_slave_io;
-                        # echo $remote_slave_sql;
-                        # echo $remote_seconds_behind_master
-
-			remotenode=`crm node list  | grep -vi $(uname -n)  | sed -e "s/(.*//"  `
-			
-			if [ $remote_slave_io == "Yes" ]  && [ $remote_slave_sql ==  "Yes" ]; then 
-				# echo "Remote slave is running"
-				if [ $remote_seconds_behind_master -gt 0 ]; then 
-			    		# echo "Remote node is slow" 
-					if [ $remote_seconds_behind_master -gt $local_seconds_behind_master ]; then 
-						# echo "Remote node is slower than local node -> Demote "
-						cibadmin --replace --obj_type constraints --xml-text "<rsc_location id=\"mysql_repli_lag_$remotenode\" node=\"$remotenode\" rsc=\"svc_mysql\" score=\"100\"/>"
-					fi
-				else
-					# echo "Remote node is running and up to speed , restoring score " 
-					cibadmin --replace --obj_type constraints --xml-text "<rsc_location id=\"mysql_repli_lag_$remotenode\" node=\"$remotenode\" rsc=\"svc_mysql\" score=\"200\"/>"
-				fi
-
-			else 
-				# echo "Remote slave is NOT running -> Degrade heavy "
-				cibadmin --replace --obj_type constraints --xml-text "<rsc_location id=\"mysql_repli_lag_$remotenode\" node=\"$remotenode\" rsc=\"svc_mysql\" score=\"50\"/>"
-			fi	
-	
-			rm $tmpfile 
-
-		  		
-
-
-			} 
-
-			# 	
-			#else
-			#{
-			#echo "Not enough nodes" 
-			#}
-			fi 
-
-	
- 	    	}	
-	    	else 
-            	{
-            	return $OCF_SUCCESS
-	        } 
-	        fi 
-	    fi
+  # Monitor _MUST!_ differentiate correctly between running
+  # (SUCCESS), failed (ERROR) or _cleanly_ stopped (NOT RUNNING).
+  # That is THREE states, not just yes/no.
+  # Verify the status based on the pid-file existence
+  if [ -e /var/run/ra-mysql.pid ]; then
+    # Verify the status based on the functionality
+    #buf=`echo "SELECT * FROM $OCF_RESKEY_test_table" | mysql --user=$OCF_RESKEY_test_user --password=$OCF_RESKEY_test_passwd  --connect_timeout=1 2>&1`
+    buf=`echo "SELECT now()" | mysql --user=$OCF_RESKEY_test_user --password=$OCF_RESKEY_test_passwd  --connect_timeout=1 2>&1`
+    rc=$?
+    if [ $rc -eq 0 ]; then
+      # Test Replication code is in experimental stage
+      if [ -n "${OCF_RESKEY_test_replication:+x}" ]; then
+        if [ $OCF_RESKEY_test_replication -eq  1 ]; then
+        {
+          # Warning:offline node: xms-1
+          notenoughnodes=`crm_mon -s  | grep Warning  | wc -l`
+          if [ $notenoughnodes  -eq 0 ]; then 
+          {
+            # not enough active nodes to do in depth monitoring 
+            # echo "And we got Enough  Nodes "
+            tmpfile=`mktemp /tmp/replistate.XXXXX`
+            source /etc/mysql.conf || die "Could not load config file /etc/mysql.conf"
+            # Get Local mysql slave status 
+            echo "SHOW SLAVE STATUS \G "| mysql --user=$OCF_RESKEY_test_user --password=$OCF_RESKEY_test_passwd  --connect_timeout=1  > $tmpfile 
+            local_slave_io=`sed -ne 's/^.*Slave_IO_Running: \(.*\)$/\1/p' < $tmpfile  `
+            local_slave_sql=`sed -ne 's/^.*Slave_SQL_Running: \(.*\)$/\1/p' < $tmpfile `
+            local_seconds_behind_master=`sed -ne 's/^.*Seconds_Behind_Master: \(.*\)$/\1/p' <  $tmpfile `
+            # echo $local_slave_io;
+            # echo $local_slave_sql;
+            # echo $local_seconds_behind_master 
+            rm $tmpfile 
+            # Get remote  mysql slave status 
+            tmpfile=`mktemp /tmp/rreplistate.XXXX`
+            echo "SHOW SLAVE STATUS \G "| mysql --user=$OCF_RESKEY_test_user --host $MYSQL_NEIGHBOUR_IP --password=$OCF_RESKEY_test_passwd  --connect_timeout=1  > $tmpfile 
+            remote_slave_io=`sed -ne 's/^.*Slave_IO_Running: \(.*\)$/\1/p' < $tmpfile  `
+            remote_slave_sql=`sed -ne 's/^.*Slave_SQL_Running: \(.*\)$/\1/p' < $tmpfile `
+            remote_seconds_behind_master=`sed -ne 's/^.*Seconds_Behind_Master: \(.*\)$/\1/p' <  $tmpfile `
+            # echo $remote_slave_io;
+            # echo $remote_slave_sql;
+            # echo $remote_seconds_behind_master
+            remotenode=`crm node list  | grep -vi $(uname -n)  | sed -e "s/(.*//"  `
+            if [ $remote_slave_io == "Yes" ]  && [ $remote_slave_sql ==  "Yes" ]; then
+              # echo "Remote slave is running"
+              if [ $remote_seconds_behind_master -gt 0 ]; then
+                # echo "Remote node is slow"
+                if [ $remote_seconds_behind_master -gt $local_seconds_behind_master ]; then
+                  # echo "Remote node is slower than local node -> Demote "
+                  cibadmin --replace --obj_type constraints --xml-text "<rsc_location id=\"mysql_repli_lag_$remotenode\" node=\"$remotenode\" rsc=\"svc_mysql\" score=\"100\"/>"
+                fi
+              else
+                # echo "Remote node is running and up to speed , restoring score " 
+                cibadmin --replace --obj_type constraints --xml-text "<rsc_location id=\"mysql_repli_lag_$remotenode\" node=\"$remotenode\" rsc=\"svc_mysql\" score=\"200\"/>"
+              fi
+            else
+              # echo "Remote slave is NOT running -> Degrade heavy "
+              cibadmin --replace --obj_type constraints --xml-text "<rsc_location id=\"mysql_repli_lag_$remotenode\" node=\"$remotenode\" rsc=\"svc_mysql\" score=\"50\"/>"
+            fi
+            rm $tmpfile
+            }
+            # else
+            # {
+            # echo "Not enough nodes" 
+            # }
+          fi
+          }
         else
-            # MySQL check for test_table failed
-            ocf_log err "MySQL $test_table monitor failed";
-            return $OCF_ERR_GENERIC
+        {
+          return $OCF_SUCCESS
+        }
         fi
+      fi
     else
-        # MySQL (RA) is not running
-        ocf_log err "MySQL (RA) is not running"
-        return $OCF_NOT_RUNNING
+      # MySQL check for test_table failed
+      ocf_log err "MySQL $test_table monitor failed";
+      return $OCF_ERR_GENERIC
     fi
-
+  else
+    # MySQL (RA) is not running
+    ocf_log err "MySQL (RA) is not running"
+    return $OCF_NOT_RUNNING
+  fi
 }
 
 mysql_validate() {
