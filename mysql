@@ -56,6 +56,11 @@ Location to store the resource state in.
 <content type="string" default="${HA_RSCTMP}/mysql-{OCF_RESOURCE_INSTANCE}.state" />
 </parameter>
 
+<parameter name="service_name">
+<content type="string" default="mysql" />
+<shortdesc lang="en">Name of the unix service to use</shortdesc>
+</parameter>
+
 <parameter name="test_user" unique="1">
 <content type="string" default="" />
 </parameter>
@@ -65,7 +70,7 @@ Location to store the resource state in.
 </parameter>
 <!--
 <parameter name="test_table" unique="1">
-<content type="string" default="" />
+<content type="string" default="mysql.user" />
 </parameter>
 
 
@@ -110,18 +115,30 @@ END
 }
 
 mysql_start() {
-
+  touch $OCF_RESKEY_state
   mysql_monitor
-  if [ $? = $OCF_SUCCESS ]; then
-    # MySQL (RA) is already started
-    :
-  else
+  if [ $? -ne $OCF_SUCCESS ]; then
     # start MySQL (RA), start MySQL (daemon)
-    touch /var/run/ra-mysql.pid
-    /etc/init.d/mysql start
+    /sbin/service $OCF_RESKEY_service_name start
   fi
   return $OCF_SUCCESS
+}
 
+mysql_promote() {
+  # Do nothing
+  mysql_monitor
+}
+
+mysql_demote() {
+  mysql_monitor
+  if [ $? = $OCF_SUCCESS ]; then
+      # restart MySQL (daemon) [needed to reset active connections]
+      /sbin/service $OCF_RESKEY_service_name restart
+  else
+      # mysql monitoring failed
+      return $OCF_ERR_GENERIC
+  fi
+  return $OCF_SUCCESS
 }
 
 mysql_stop() {
@@ -129,15 +146,13 @@ mysql_stop() {
   mysql_monitor
   if [ $? = $OCF_SUCCESS ]; then
     # stop MySQL (RA)
-    rm -f /var/run/ra-mysql.pid
-    # restart MySQL (daemon) [needed to reset active connections]
-    /etc/init.d/mysql restart
-  else
-    # MySQL (RA) is already stopped
-    :
+    /sbin/service $OCF_RESKEY_service_name stop
+    rm -f $OCF_RESKEY_state
+  elif test -f $OCF_RESKEY_state
+  then
+      rm $OCF_RESKEY_state
   fi
   return $OCF_SUCCESS
-
 }
 
 mysql_monitor() {
@@ -145,7 +160,7 @@ mysql_monitor() {
   # (SUCCESS), failed (ERROR) or _cleanly_ stopped (NOT RUNNING).
   # That is THREE states, not just yes/no.
   # Verify the status based on the pid-file existence
-  if [ -e /var/run/ra-mysql.pid ]; then
+  if [ -e $OCF_RESKEY_state ]; then
     # Verify the status based on the functionality
     #buf=`echo "SELECT * FROM $OCF_RESKEY_test_table" | mysql --user=$OCF_RESKEY_test_user --password=$OCF_RESKEY_test_passwd  --connect_timeout=1 2>&1`
     buf=`echo "SELECT now()" | mysql --user=$OCF_RESKEY_test_user --password=$OCF_RESKEY_test_passwd  --connect_timeout=1 2>&1`
@@ -245,6 +260,8 @@ meta-data)	meta_data
 		;;
 start)		mysql_start;;
 stop)		mysql_stop;;
+promote)		mysql_start;;
+demote)		mysql_stop;;
 monitor)	mysql_monitor;;
 migrate_to)	ocf_log info "Migrating ${OCF_RESOURCE_INSTANCE} to ${OCF_RESKEY_CRM_meta_migrate_to}."
 	        mysql_stop
